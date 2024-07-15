@@ -45,6 +45,7 @@ import java.util.Locale;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 import org.apache.commons.net.MalformedServerReplyException;
@@ -265,6 +266,46 @@ import org.apache.commons.net.util.NetConstants;
  * @see org.apache.commons.net.MalformedServerReplyException
  */
 public class FTPClient extends FTP implements Configurable {
+    private static final long SIZE_1_M = 1024 * 1024;
+    private static final double SPEED_MAX = 1000;
+    private static final double SPEED_MIN = 0;
+    private double speed = SPEED_MAX;
+
+    public double getSpeed() {
+        return speed;
+    }
+
+    public void setSpeed(double speed) {
+        this.speed = (speed > SPEED_MIN && speed <= SPEED_MAX)? speed : SPEED_MAX;
+    }
+
+    public void speedLimit(long totalBytesTransferred, long startMillis){
+        try{
+            long sizeM = totalBytesTransferred / SIZE_1_M;
+            if(sizeM <= 1){
+                return;
+            }
+
+            double secondDiff = (System.currentTimeMillis() - startMillis) / 1000.0;
+            if (secondDiff <= 0){
+                return;
+            }
+
+            double currSpeed = sizeM / secondDiff;
+            int cnt = 10;
+            while (cnt > 0 && currSpeed > speed){
+                cnt--;
+                TimeUnit.MILLISECONDS.sleep(100);
+                secondDiff = (System.currentTimeMillis() - startMillis) / 1000.0;
+                if (secondDiff <= 0){
+                    break;
+                }
+                currSpeed = sizeM / secondDiff;
+            }
+        } catch (Exception e) {
+            ;
+        }
+    }
 
     // @since 3.0
     private static final class CSL implements CopyStreamListener {
@@ -274,6 +315,7 @@ public class FTPClient extends FTP implements Configurable {
         private final int currentSoTimeoutMillis;
 
         private long lastIdleTimeMillis = System.currentTimeMillis();
+        private long startMillis = System.currentTimeMillis();
         private int notAcked;
         private int acksAcked;
         private int ioErrors;
@@ -305,6 +347,8 @@ public class FTPClient extends FTP implements Configurable {
                 }
                 lastIdleTimeMillis = nowMillis;
             }
+            //speed limit
+            parent.speedLimit(totalBytesTransferred, startMillis);
         }
 
         int[] cleanUp() throws IOException {
